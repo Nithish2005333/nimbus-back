@@ -35,9 +35,20 @@ app.use((req, res, next) => {
 });
 
 // connect mongo
-mongoose.connect(process.env.MONGO_URL, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => console.log("MongoDB Connected"))
-  .catch(err => console.log("MongoDB Error:", err));
+const MONGO_URL = process.env.MONGO_URL;
+if (!MONGO_URL) {
+  console.error("CRITICAL ERROR: MONGO_URL environment variable is missing!");
+  // In a serverless environment, we might want to still start the server 
+  // but all DB-dependent routes will fail. 
+  // However, it's better to log it clearly.
+} else {
+  mongoose.connect(MONGO_URL)
+    .then(() => console.log("MongoDB Connected Successfully"))
+    .catch(err => {
+      console.error("MongoDB Connection Error:");
+      console.error(err);
+    });
+}
 
 // ensure base storage path exists
 const baseStorage = process.env.STORAGE_PATH || path.join(__dirname, "storage");
