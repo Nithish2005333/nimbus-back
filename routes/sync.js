@@ -6,19 +6,26 @@ const fs = require("fs");
 const path = require("path");
 const FileModel = require("../models/File");
 
-// Get storage path
+// Get storage path with Vercel/Serverless support
 const getStoragePath = () => {
+  // On Vercel, we MUST use /tmp for any write operations
+  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+    return '/tmp';
+  }
   return process.env.STORAGE_PATH || path.join(__dirname, "..", "storage");
 };
 
-// Check if this device has the pendrive (is the storage server)
+// Check if this device can handle storage
 const isStorageServer = () => {
+  // If Cloudinary is configured, we can always act as a storage gateway
+  if (process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+    return true;
+  }
+
   const storagePath = getStoragePath();
-  // Check if storage path exists and is writable (pendrive connected)
   try {
     if (fs.existsSync(storagePath)) {
-      // Try to write a test file
-      const testFile = path.join(storagePath, '.test-write');
+      const testFile = path.join(storagePath, '.test-write-' + Date.now());
       fs.writeFileSync(testFile, 'test');
       fs.unlinkSync(testFile);
       return true;
@@ -80,53 +87,61 @@ router.post("/file", auth, async (req, res) => {
 
     // Decode base64 file data (encrypted file)
     const buffer = Buffer.from(fileData, 'base64');
+    // Define full path in the correct storage location
     const filePath = path.join(userUploads, fileName);
-    
-    // Write encrypted file to pendrive/hard disk
+
+    // Write encrypted file to temp storage first
     fs.writeFileSync(filePath, buffer);
+
+    // --- UPLOAD TO CLOUDINARY ---
+    const { uploadToCloudinary } = require("../utils/cloudinary");
+    let cloudinaryResult = null;
+    try {
+      const folderName = `${process.env.CLOUDINARY_FOLDER || 'NimbusCloud'}/${userId}`;
+      cloudinaryResult = await uploadToCloudinary(filePath, {
+        folder: folderName,
+        resource_type: 'auto',
+        public_id: fileName
+      });
+      
+      // Cleanup local temp file
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (cloudinaryErr) {
+      console.error("[Cloudinary Sync] Error:", cloudinaryErr);
+      // If we are not on Vercel, we can keep the local file as fallback
+      if (process.env.VERCEL) {
+        throw new Error("Cloudinary upload failed and local storage is restricted: " + cloudinaryErr.message);
+      }
+    }
 
     // Determine if file is encrypted
     const isEncrypted = !!(encryptionSalt && encryptionIV);
-    const originalName = originalFileName || fileName.replace(/\.enc$/, ''); // Remove .enc if present
+    const originalName = originalFileName || fileName.replace(/\.enc$/, '');
 
-    // Save metadata to DB (including encryption info)
+    // Save metadata to DB
     const newFile = new FileModel({
       userId: userId,
-      filename: fileName, // Encrypted filename on disk
-      originalName: originalName, // Original filename (for user display)
-      path: filePath,
+      filename: fileName,
+      originalName: originalName,
+      path: cloudinaryResult ? cloudinaryResult.secure_url : filePath,
       size: fileSize || buffer.length,
       isEncrypted: isEncrypted,
       encryptionSalt: encryptionSalt,
       encryptionIV: encryptionIV,
-      storageMedia: process.env.STORAGE_MEDIA_TYPE || 'pendrive',
-      storagePath: filePath
+      storageMedia: cloudinaryResult ? 'cloudinary' : 'pendrive',
+      storagePath: cloudinaryResult ? cloudinaryResult.secure_url : filePath,
+      cloudinary_url: cloudinaryResult ? cloudinaryResult.secure_url : null,
+      cloudinary_id: cloudinaryResult ? cloudinaryResult.public_id : null
     });
     
     await newFile.save();
 
-    // Log activity
-    try {
-      const logsDir = path.join(baseStorage, userId, "logs");
-      if (!fs.existsSync(logsDir)) {
-        fs.mkdirSync(logsDir, { recursive: true });
-      }
-      const logLine = `SYNC_UPLOAD: ${fileName}, SIZE: ${buffer.length}, TIME: ${new Date().toISOString()}\n`;
-      const logPath = path.join(logsDir, "activity.log");
-      fs.appendFileSync(logPath, logLine);
-    } catch (logError) {
-      console.error("Failed to write activity log:", logError);
-    }
-
     res.json({ 
       success: true, 
-      msg: "File synced to pendrive successfully",
-      file: {
-        _id: newFile._id,
-        filename: fileName,
-        path: filePath,
-        size: buffer.length
-      }
+      msg: cloudinaryResult ? "File stored in Cloudinary successfully" : "File synced to local storage successfully",
+      file: newFile
     });
   } catch (err) {
     console.error("Sync file error:", err);

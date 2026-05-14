@@ -5,8 +5,11 @@ const auth = require("../middleware/auth");
 const fs = require("fs");
 const path = require("path");
 
-// Get storage path with fallback
+// Get storage path with Vercel/Serverless support
 const getStoragePath = () => {
+  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+    return '/tmp';
+  }
   return process.env.STORAGE_PATH || path.join(__dirname, "..", "storage");
 };
 
