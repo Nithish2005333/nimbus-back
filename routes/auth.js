@@ -24,7 +24,7 @@ const getRpId = (req) => {
   const host = req.hostname;
   return host;
 };
-const ORIGIN = ['http://localhost:5173', 'https://deprecatory-palmar-vanna.ngrok-free.dev', 'http://localhost:5000'];
+const ORIGIN = ['http://localhost:5173', 'https://deprecatory-palmar-vanna.ngrok-free.dev', 'http://localhost:5000', 'https://nimbus-front-opal.vercel.app'];
 
 // --- Helper Middleware for Authentication ---
 const verifyToken = (req, res, next) => {
