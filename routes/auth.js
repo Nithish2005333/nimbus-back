@@ -79,17 +79,23 @@ router.post("/register", async (req, res) => {
 
     await user.save();
 
-    // create user folder structure
-    const baseStorage = process.env.STORAGE_PATH || path.join(__dirname, "..", "storage");
-    const userFolder = path.join(baseStorage, user._id.toString());
+    // create user folder structure (Optional on Serverless/Vercel)
+    try {
+      const isServerless = process.env.VERCEL || process.env.NODE_ENV === 'production';
+      const baseStorage = isServerless ? '/tmp' : (process.env.STORAGE_PATH || path.join(__dirname, "..", "storage"));
+      const userFolder = path.join(baseStorage, user._id.toString());
 
-    if (!fs.existsSync(baseStorage)) {
-      fs.mkdirSync(baseStorage, { recursive: true });
-    }
-    if (!fs.existsSync(userFolder)) {
-      fs.mkdirSync(userFolder, { recursive: true });
-      fs.mkdirSync(path.join(userFolder, "uploads"), { recursive: true });
-      fs.mkdirSync(path.join(userFolder, "logs"), { recursive: true });
+      if (!fs.existsSync(baseStorage)) {
+        fs.mkdirSync(baseStorage, { recursive: true });
+      }
+      if (!fs.existsSync(userFolder)) {
+        fs.mkdirSync(userFolder, { recursive: true });
+        fs.mkdirSync(path.join(userFolder, "uploads"), { recursive: true });
+        fs.mkdirSync(path.join(userFolder, "logs"), { recursive: true });
+      }
+    } catch (fsErr) {
+      console.warn('Folder creation skipped or failed:', fsErr.message);
+      // We don't throw here because Cloudinary might still work for uploads
     }
 
     res.json({ success: true, msg: "User registered", userId: user._id });
